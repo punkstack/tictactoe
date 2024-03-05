@@ -25,10 +25,14 @@ type WebSocketManager struct {
 // NewWebSocketManager creates a new instance and starts its main loop.
 func NewWebSocketManager(userManager *UserManager, gameManager *GameManager, matchmakingManager *MatchmakingManager) *WebSocketManager {
 	wsm := &WebSocketManager{
-		clients:            make(map[*websocket.Conn]*models.User),
-		userManager:        userManager,
-		gameManager:        gameManager,
-		upgrader:           websocket.Upgrader{},
+		clients:     make(map[*websocket.Conn]*models.User),
+		userManager: userManager,
+		gameManager: gameManager,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true // Bypass the origin check
+			},
+		},
 		register:           make(chan *websocket.Conn),
 		matchmakingManager: matchmakingManager,
 		unregister:         make(chan *websocket.Conn),
@@ -75,7 +79,6 @@ func (wsm *WebSocketManager) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 }
 
 // handleMessages reads and processes messages from the connection.
-// handleMessages reads and processes messages from a specific WebSocket connection.
 func (wsm *WebSocketManager) handleMessages(conn *websocket.Conn) {
 	defer func() {
 		user := wsm.clients[conn]
@@ -123,6 +126,13 @@ func (wsm *WebSocketManager) handleMessages(conn *websocket.Conn) {
 				wsm.sendError(conn, "User not registered")
 				continue
 			}
+
+			for _, game := range wsm.gameManager.games {
+				if game.Players[0].DeviceID == user.DeviceID || game.Players[1].DeviceID == user.DeviceID {
+					wsm.notifyGameUpdate(game)
+					continue
+				}
+			}
 			// Handle matchmaking and game initiation
 			game, err := wsm.matchmakingManager.RequestMatch(context.Background(), user)
 			if err != nil {
@@ -130,9 +140,11 @@ func (wsm *WebSocketManager) handleMessages(conn *websocket.Conn) {
 				continue
 			}
 			if game != nil {
+				wsm.gameManager.mu.Lock()
 				wsm.gameManager.games[game.ID] = game
 				// Game found, notify both players
 				wsm.notifyGameStart(game)
+				wsm.gameManager.mu.Unlock()
 			} else {
 				// No match found within timeout, notify player
 				wsm.sendNoMatchFound(conn)

@@ -24,6 +24,8 @@ func NewMatchmakingManager() *MatchmakingManager {
 func (m *MatchmakingManager) RequestMatch(ctx context.Context, user *models.User) (*models.Game, error) {
 	matchChan := make(chan *models.Game, len(m.matchmaking)+1)
 
+	// check and remove user from old game .... or  return current game
+
 	m.mu.Lock()
 	for opponent, oppChan := range m.matchmaking {
 		// Found an opponent, remove them from the matchmaking pool and start a game
